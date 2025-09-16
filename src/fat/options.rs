@@ -1,17 +1,14 @@
 use crate::*;
 
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-
 #[derive(Debug)]
 /// FileSystem mount options
-pub struct FSOptions {
-    pub(crate) clock: Box<dyn Clock>,
+pub struct FSOptions<C: Clock> {
+    pub(crate) clock: C,
     pub(crate) codepage: codepage::Codepage,
     pub(crate) update_file_fields: bool,
 }
 
-impl FSOptions {
+impl FSOptions<DefaultClock> {
     #[inline]
     /// Create a new options struct with the default options
     ///
@@ -19,7 +16,9 @@ impl FSOptions {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<C: Clock> FSOptions<C> {
     /// Set the codepage to be used by the filesystem
     pub fn set_codepage(&mut self, codepage: Codepage) {
         self.codepage = codepage
@@ -45,10 +44,10 @@ impl FSOptions {
     }
 }
 
-impl Default for FSOptions {
+impl Default for FSOptions<DefaultClock> {
     fn default() -> Self {
         Self {
-            clock: Box::new(DefaultClock),
+            clock: DefaultClock,
             #[allow(clippy::default_constructed_unit_structs)] // the allow(clippy) is only used when no codepage feature is used
             codepage: codepage::Codepage::default(),
             update_file_fields: false,
