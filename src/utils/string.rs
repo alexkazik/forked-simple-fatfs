@@ -258,7 +258,7 @@ fn test_sfn_generator_short() {
     );
 }
 
-#[cfg(feature = "codepage")]
+#[cfg(any(feature = "codepage", feature = "cp437"))]
 #[test]
 fn test_sfn_generator_cp_chars_cp437() {
     let mut gen = SfnGenerator::new("tëst.txt", Codepage::CP437);
@@ -272,7 +272,27 @@ fn test_sfn_generator_cp_chars_cp437() {
     );
 }
 
-#[cfg(not(feature = "codepage"))]
+#[cfg(not(any(
+    feature = "codepage",
+    feature = "cp437",
+    feature = "cp720",
+    feature = "cp737",
+    feature = "cp775",
+    feature = "cp850",
+    feature = "cp852",
+    feature = "cp855",
+    feature = "cp857",
+    feature = "cp858",
+    feature = "cp860",
+    feature = "cp861",
+    feature = "cp862",
+    feature = "cp863",
+    feature = "cp864",
+    feature = "cp865",
+    feature = "cp866",
+    feature = "cp869",
+    feature = "cp874"
+)))]
 #[test]
 fn test_sfn_generator_cp_chars_ascii() {
     let mut gen = SfnGenerator::new("tëst.txt", Codepage);

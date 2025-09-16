@@ -94,7 +94,30 @@
 
 extern crate alloc;
 
-#[cfg_attr(not(feature = "codepage"), path = "codepage_ascii.rs")]
+#[cfg_attr(
+    not(any(
+        feature = "codepage",
+        feature = "cp437",
+        feature = "cp720",
+        feature = "cp737",
+        feature = "cp775",
+        feature = "cp850",
+        feature = "cp852",
+        feature = "cp855",
+        feature = "cp857",
+        feature = "cp858",
+        feature = "cp860",
+        feature = "cp861",
+        feature = "cp862",
+        feature = "cp863",
+        feature = "cp864",
+        feature = "cp865",
+        feature = "cp866",
+        feature = "cp869",
+        feature = "cp874"
+    )),
+    path = "codepage_ascii.rs"
+)]
 mod codepage;
 mod error;
 mod fat;
