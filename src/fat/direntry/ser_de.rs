@@ -263,7 +263,7 @@ impl Iterator for EntryComposer {
 impl iter::FusedIterator for EntryComposer {}
 
 #[derive(Debug)]
-pub(crate) struct ReadDirInt<'a, S, C>
+pub(crate) struct ReadDirInt<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -276,15 +276,15 @@ where
     // if `None`, we have exhausted the iterator
     entry_location: Option<EntryLocation>,
 
-    pub(crate) fs: &'a FileSystem<S, C>,
+    pub(crate) fs: &'a FileSystem<'s, S, C>,
 }
 
-impl<'a, S, C> ReadDirInt<'a, S, C>
+impl<'a, 's, S, C> ReadDirInt<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
-    pub(crate) fn new(fs: &'a FileSystem<S, C>, chain_start: &EntryLocationUnit) -> Self {
+    pub(crate) fn new(fs: &'a FileSystem<'s, S, C>, chain_start: &EntryLocationUnit) -> Self {
         Self {
             lfn_buf: [0; CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES],
             lfn_buf_pos: CHARS_PER_LFN_ENTRY * LFN_MAX_ENTRIES,
@@ -439,7 +439,7 @@ where
     }
 }
 
-impl<S, C> Iterator for ReadDirInt<'_, S, C>
+impl<S, C> Iterator for ReadDirInt<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -463,7 +463,7 @@ where
     }
 }
 
-impl<S, C> iter::FusedIterator for ReadDirInt<'_, S, C>
+impl<S, C> iter::FusedIterator for ReadDirInt<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,

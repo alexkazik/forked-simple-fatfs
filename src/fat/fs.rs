@@ -108,7 +108,7 @@ struct FATEntryProps {
 
 impl FATEntryProps {
     /// Get the [`FATEntryProps`] of the `n`-th [`FATEntry`] of a [`FileSystem`]
-    pub fn new<S, C>(n: FATEntryIndex, fs: &FileSystem<S, C>) -> Self
+    pub fn new<S, C>(n: FATEntryIndex, fs: &FileSystem<'_, S, C>) -> Self
     where
         S: Read + Seek,
         C: Clock,
@@ -144,7 +144,7 @@ struct FATSectorProps {
 
 impl FATSectorProps {
     /// Returns [`None`] if this sector doesn't belong to a FAT table
-    pub fn new<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Option<Self>
+    pub fn new<S, C>(sector: SectorIndex, fs: &FileSystem<'_, S, C>) -> Option<Self>
     where
         S: Read + Seek,
         C: Clock,
@@ -166,7 +166,10 @@ impl FATSectorProps {
     }
 
     #[allow(non_snake_case)]
-    pub fn get_corresponding_FAT_sectors<S, C>(&self, fs: &FileSystem<S, C>) -> Box<[SectorIndex]>
+    pub fn get_corresponding_FAT_sectors<S, C>(
+        &self,
+        fs: &FileSystem<'_, S, C>,
+    ) -> Box<[SectorIndex]>
     where
         S: Read + Seek,
         C: Clock,
@@ -215,7 +218,7 @@ impl DirInfo {
     }
 }
 
-impl<S, C> iter::FusedIterator for ReadDir<'_, S, C>
+impl<S, C> iter::FusedIterator for ReadDir<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -256,7 +259,7 @@ pub(crate) trait OffsetConversions {
     }
 }
 
-impl<S, C> OffsetConversions for FileSystem<S, C>
+impl<S, C> OffsetConversions for FileSystem<'_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -389,12 +392,13 @@ impl Default for FileFilter {
     }
 }
 
-type SyncSectorBufferFn<S, C> = fn(&FileSystem<S, C>) -> Result<(), <S as ErrorType>::Error>;
-type UnmountFn<S, C> = fn(&FileSystem<S, C>) -> FSResult<(), <S as ErrorType>::Error>;
+type SyncSectorBufferFn<'s, S, C> =
+    fn(&FileSystem<'s, S, C>) -> Result<(), <S as ErrorType>::Error>;
+type UnmountFn<'s, S, C> = fn(&FileSystem<'s, S, C>) -> FSResult<(), <S as ErrorType>::Error>;
 
 /// An API to process a FAT filesystem
 #[derive(Debug)]
-pub struct FileSystem<S, C>
+pub struct FileSystem<'s, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -403,13 +407,13 @@ where
     storage: RefCell<S>,
 
     /// The length of this will be the sector size of the FS for all FAT types except FAT12, in that case, it will be double that value
-    pub(crate) sector_buffer: RefCell<SectorBuffer>,
+    pub(crate) sector_buffer: RefCell<SectorBuffer<'s>>,
     fsinfo_modified: RefCell<bool>,
 
     pub(crate) dir_info: RefCell<DirInfo>,
 
-    sync_f: RefCell<Option<SyncSectorBufferFn<S, C>>>,
-    unmount_f: RefCell<Option<UnmountFn<S, C>>>,
+    sync_f: RefCell<Option<SyncSectorBufferFn<'s, S, C>>>,
+    unmount_f: RefCell<Option<UnmountFn<'s, S, C>>>,
 
     pub(crate) options: FSOptions<C>,
 
@@ -425,7 +429,7 @@ where
 }
 
 /// Getter functions
-impl<S, C> FileSystem<S, C>
+impl<S, C> FileSystem<'_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -437,7 +441,7 @@ where
 }
 
 /// Setter functions
-impl<S, C> FileSystem<S, C>
+impl<S, C> FileSystem<'_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -460,7 +464,7 @@ where
 }
 
 /// Constructors for a [`FileSystem`]
-impl<S, C> FileSystem<S, C>
+impl<S, C> FileSystem<'static, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -579,12 +583,12 @@ where
 }
 
 /// Internal [`Read`]-related low-level functions
-impl<S, C> FileSystem<S, C>
+impl<'s, S, C> FileSystem<'s, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
-    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, S, C> {
+    pub(crate) fn process_current_dir<'a>(&'a self) -> ReadDirInt<'a, 's, S, C> {
         ReadDirInt::new(self, &self.dir_info.borrow().chain_start)
     }
 
@@ -1019,7 +1023,7 @@ where
 }
 
 /// Internal [`Write`]-related low-level functions
-impl<S, C> FileSystem<S, C>
+impl<'s, S, C> FileSystem<'s, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -1666,7 +1670,7 @@ where
     fn get_rw_file_unchecked<P: AsRef<Path>>(
         &self,
         path: P,
-    ) -> FSResult<RWFile<'_, S, C>, S::Error> {
+    ) -> FSResult<RWFile<'_, 's, S, C>, S::Error> {
         let ro_file = self.get_ro_file(path)?;
 
         Ok(ro_file.into())
@@ -1674,7 +1678,7 @@ where
 }
 
 /// Public [`Read`]-related functions
-impl<S, C> FileSystem<S, C>
+impl<'s, S, C> FileSystem<'s, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -1682,7 +1686,7 @@ where
     /// Read all the entries of a directory ([`Path`]) into [`ReadDir`]
     ///
     /// Fails if `path` doesn't represent a directory, or if that directory doesn't exist
-    pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, S, C>, S::Error> {
+    pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> FSResult<ReadDir<'_, 's, S, C>, S::Error> {
         // normalize the given path
         let path = path.as_ref();
 
@@ -1704,7 +1708,7 @@ where
     /// Get a corresponding [`ROFile`] object from a [`Path`]
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_ro_file<P: AsRef<Path>>(&self, path: P) -> FSResult<ROFile<'_, S, C>, S::Error> {
+    pub fn get_ro_file<P: AsRef<Path>>(&self, path: P) -> FSResult<ROFile<'_, 's, S, C>, S::Error> {
         let path = path.as_ref();
 
         if !path.is_valid() {
@@ -1768,14 +1772,14 @@ where
 }
 
 /// [`Write`]-related functions
-impl<S, C> FileSystem<S, C>
+impl<'s, S, C> FileSystem<'s, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
 {
     /// Create a new [`RWFile`] and return its handle
     #[inline]
-    pub fn create_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S, C>, S::Error> {
+    pub fn create_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, 's, S, C>, S::Error> {
         let path = path.as_ref();
 
         if !path.is_valid() {
@@ -2194,7 +2198,7 @@ where
     /// Get a corresponding [`RWFile`] object from a [`Path`]
     ///
     /// Fails if `path` doesn't represent a file, or if that file doesn't exist
-    pub fn get_rw_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, S, C>, S::Error> {
+    pub fn get_rw_file<P: AsRef<Path>>(&self, path: P) -> FSResult<RWFile<'_, 's, S, C>, S::Error> {
         let rw_file = self.get_rw_file_unchecked(path)?;
 
         if rw_file.attributes.read_only {
@@ -2220,7 +2224,7 @@ where
     }
 }
 
-impl<S, C> ops::Drop for FileSystem<S, C>
+impl<S, C> ops::Drop for FileSystem<'_, S, C>
 where
     S: Read + Seek,
     C: Clock,

@@ -18,7 +18,10 @@ pub(crate) enum EntryLocationUnit {
 impl EntryLocationUnit {
     // I will leave this here in case it is needed in the future
     #[allow(unused)]
-    pub(crate) fn from_partition_sector<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Self
+    pub(crate) fn from_partition_sector<S, C>(
+        sector: SectorIndex,
+        fs: &FileSystem<'_, S, C>,
+    ) -> Self
     where
         S: Read + Seek,
         C: Clock,
@@ -33,7 +36,7 @@ impl EntryLocationUnit {
         }
     }
 
-    pub(crate) fn get_max_offset<S, C>(&self, fs: &FileSystem<S, C>) -> u16
+    pub(crate) fn get_max_offset<S, C>(&self, fs: &FileSystem<'_, S, C>) -> u16
     where
         S: Read + Seek,
         C: Clock,
@@ -47,7 +50,7 @@ impl EntryLocationUnit {
             .expect("a cluster can have a max of ~16k entries")
     }
 
-    pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<S, C>) -> SectorIndex
+    pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<'_, S, C>) -> SectorIndex
     where
         S: Read + Seek,
         C: Clock,
@@ -64,7 +67,7 @@ impl EntryLocationUnit {
 
     pub(crate) fn get_next_unit<S, C>(
         &self,
-        fs: &FileSystem<S, C>,
+        fs: &FileSystem<'_, S, C>,
     ) -> Result<Option<EntryLocationUnit>, S::Error>
     where
         S: Read + Seek,
@@ -114,7 +117,10 @@ pub(crate) struct EntryLocation {
 }
 
 impl EntryLocation {
-    pub(crate) fn from_partition_sector<S, C>(sector: SectorIndex, fs: &FileSystem<S, C>) -> Self
+    pub(crate) fn from_partition_sector<S, C>(
+        sector: SectorIndex,
+        fs: &FileSystem<'_, S, C>,
+    ) -> Self
     where
         S: Read + Seek,
         C: Clock,
@@ -124,7 +130,10 @@ impl EntryLocation {
         Self { unit, index: 0 }
     }
 
-    pub(crate) fn entry_status<S, C>(&self, fs: &FileSystem<S, C>) -> Result<EntryStatus, S::Error>
+    pub(crate) fn entry_status<S, C>(
+        &self,
+        fs: &FileSystem<'_, S, C>,
+    ) -> Result<EntryStatus, S::Error>
     where
         S: Read + Seek,
         C: Clock,
@@ -141,7 +150,7 @@ impl EntryLocation {
     }
 
     #[inline]
-    pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<S, C>) -> SectorIndex
+    pub(crate) fn get_entry_sector<S, C>(&self, fs: &FileSystem<'_, S, C>) -> SectorIndex
     where
         S: Read + Seek,
         C: Clock,
@@ -154,7 +163,7 @@ impl EntryLocation {
     }
 
     #[inline]
-    pub(crate) fn get_sector_byte_offset<S, C>(&self, fs: &FileSystem<S, C>) -> usize
+    pub(crate) fn get_sector_byte_offset<S, C>(&self, fs: &FileSystem<'_, S, C>) -> usize
     where
         S: Read + Seek,
         C: Clock,
@@ -166,7 +175,7 @@ impl EntryLocation {
     // but since it is only 32 bytes, I don't think it is worth the hastle
     pub(crate) fn get_bytes<S, C>(
         &self,
-        fs: &FileSystem<S, C>,
+        fs: &FileSystem<'_, S, C>,
     ) -> Result<[u8; DIRENTRY_SIZE], S::Error>
     where
         S: Read + Seek,
@@ -184,7 +193,7 @@ impl EntryLocation {
 
     pub(crate) fn set_bytes<S, C>(
         &self,
-        fs: &FileSystem<S, C>,
+        fs: &FileSystem<'_, S, C>,
         bytes: [u8; DIRENTRY_SIZE],
     ) -> Result<(), S::Error>
     where
@@ -203,7 +212,7 @@ impl EntryLocation {
 
     pub(crate) fn free_entry<S, C>(
         &self,
-        fs: &FileSystem<S, C>,
+        fs: &FileSystem<'_, S, C>,
         is_last: bool,
     ) -> Result<(), S::Error>
     where
@@ -226,7 +235,7 @@ impl EntryLocation {
 
     pub(crate) fn next_entry<S, C>(
         mut self,
-        fs: &FileSystem<S, C>,
+        fs: &FileSystem<'_, S, C>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where
         S: Read + Seek,
@@ -251,7 +260,7 @@ impl EntryLocation {
     // The NonZero here is to ensure that the `0..n` doesn't panic
     pub(crate) fn nth_entry<S, C>(
         self,
-        fs: &FileSystem<S, C>,
+        fs: &FileSystem<'_, S, C>,
         n: num::NonZero<EntryIndex>,
     ) -> Result<Option<EntryLocation>, S::Error>
     where

@@ -227,16 +227,16 @@ impl Properties {
 
 /// A thin wrapper for [`Properties`] representing a directory entry
 #[derive(Debug)]
-pub struct DirEntry<'a, S, C>
+pub struct DirEntry<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
     pub(crate) entry: Properties,
-    pub(crate) fs: &'a FileSystem<S, C>,
+    pub(crate) fs: &'a FileSystem<'s, S, C>,
 }
 
-impl<'a, S, C> DirEntry<'a, S, C>
+impl<'a, 's, S, C> DirEntry<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -244,7 +244,7 @@ where
     /// Get the corresponding [`ROFile`] object for this [`DirEntry`]
     ///
     /// Will return [`None`] if the entry isn't a file
-    pub fn to_ro_file(&self) -> Option<ROFile<'a, S, C>> {
+    pub fn to_ro_file(&self) -> Option<ROFile<'a, 's, S, C>> {
         self.is_file().then(|| ROFile {
             fs: self.fs,
             props: FileProps {
@@ -258,7 +258,7 @@ where
     /// Get the corresponding [`ReadDir`] object for this [`DirEntry`]
     ///
     /// Will return [`None`] if the entry isn't a directory
-    pub fn to_dir(&self) -> Option<ReadDir<'a, S, C>> {
+    pub fn to_dir(&self) -> Option<ReadDir<'a, 's, S, C>> {
         self.is_dir().then(|| {
             ReadDir::new(
                 self.fs,
@@ -269,7 +269,7 @@ where
     }
 }
 
-impl<'a, S, C> DirEntry<'a, S, C>
+impl<'a, 's, S, C> DirEntry<'a, 's, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -277,12 +277,12 @@ where
     /// Get the corresponding [`RWFile`] object of this [`DirEntry`]
     ///
     /// Will return `None` if the entry is a directory
-    pub fn to_rw_file(self) -> Option<RWFile<'a, S, C>> {
+    pub fn to_rw_file(self) -> Option<RWFile<'a, 's, S, C>> {
         self.to_ro_file().map(|ro_file| ro_file.into())
     }
 }
 
-impl<S, C> ops::Deref for DirEntry<'_, S, C>
+impl<S, C> ops::Deref for DirEntry<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -300,22 +300,22 @@ where
 /// The order in which this iterator returns entries can vary
 /// and shouldn't be relied upon
 #[derive(Debug)]
-pub struct ReadDir<'a, S, C>
+pub struct ReadDir<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
-    inner: ReadDirInt<'a, S, C>,
+    inner: ReadDirInt<'a, 's, S, C>,
     parent: Box<Path>,
 }
 
-impl<'a, S, C> ReadDir<'a, S, C>
+impl<'a, 's, S, C> ReadDir<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
     pub(crate) fn new<P>(
-        fs: &'a FileSystem<S, C>,
+        fs: &'a FileSystem<'s, S, C>,
         chain_start: &EntryLocationUnit,
         parent: P,
     ) -> Self
@@ -329,12 +329,12 @@ where
     }
 }
 
-impl<'a, S, C> Iterator for ReadDir<'a, S, C>
+impl<'a, 's, S, C> Iterator for ReadDir<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
-    type Item = Result<DirEntry<'a, S, C>, S::Error>;
+    type Item = Result<DirEntry<'a, 's, S, C>, S::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {

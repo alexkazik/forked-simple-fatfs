@@ -25,16 +25,16 @@ pub(crate) struct FileProps {
 /// the [`ROFile::last_accessed_date()`](Properties::last_accessed_date())
 /// If you want to avoid this behavior in a R/W filesystem, use [`RWFile`]
 #[derive(Debug)]
-pub struct ROFile<'a, S, C>
+pub struct ROFile<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
-    pub(crate) fs: &'a FileSystem<S, C>,
+    pub(crate) fs: &'a FileSystem<'s, S, C>,
     pub(crate) props: FileProps,
 }
 
-impl<S, C> ops::Deref for ROFile<'_, S, C>
+impl<S, C> ops::Deref for ROFile<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -46,7 +46,7 @@ where
     }
 }
 
-impl<S, C> ops::DerefMut for ROFile<'_, S, C>
+impl<S, C> ops::DerefMut for ROFile<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -57,18 +57,18 @@ where
 }
 
 // Constructors
-impl<'a, S, C> ROFile<'a, S, C>
+impl<'a, 's, S, C> ROFile<'a, 's, S, C>
 where
     S: Read + Seek,
     C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
+    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<'s, S, C>) -> Self {
         Self { fs, props }
     }
 }
 
 // Internal functions
-impl<S, C> ROFile<'_, S, C>
+impl<S, C> ROFile<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -140,7 +140,7 @@ where
     }
 }
 
-impl<S, C> ErrorType for ROFile<'_, S, C>
+impl<S, C> ErrorType for ROFile<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -148,7 +148,7 @@ where
     type Error = S::Error;
 }
 
-impl<S, C> Read for ROFile<'_, S, C>
+impl<S, C> Read for ROFile<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -221,7 +221,7 @@ where
     }
 }
 
-impl<S, C> Seek for ROFile<'_, S, C>
+impl<S, C> Seek for ROFile<'_, '_, S, C>
 where
     S: Read + Seek,
     C: Clock,
@@ -273,22 +273,22 @@ where
 ///
 /// To reduce a file's size, use the [`truncate`](RWFile::truncate) method
 #[derive(Debug)]
-pub struct RWFile<'a, S, C>
+pub struct RWFile<'a, 's, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
 {
-    pub(crate) ro_file: ROFile<'a, S, C>,
+    pub(crate) ro_file: ROFile<'a, 's, S, C>,
     /// Represents whether or not the file has been written to
     pub(crate) entry_modified: bool,
 }
 
-impl<'a, S, C> From<ROFile<'a, S, C>> for RWFile<'a, S, C>
+impl<'a, 's, S, C> From<ROFile<'a, 's, S, C>> for RWFile<'a, 's, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
 {
-    fn from(value: ROFile<'a, S, C>) -> Self {
+    fn from(value: ROFile<'a, 's, S, C>) -> Self {
         Self {
             ro_file: value,
             entry_modified: false,
@@ -296,19 +296,19 @@ where
     }
 }
 
-impl<'a, S, C> ops::Deref for RWFile<'a, S, C>
+impl<'a, 's, S, C> ops::Deref for RWFile<'a, 's, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
 {
-    type Target = ROFile<'a, S, C>;
+    type Target = ROFile<'a, 's, S, C>;
 
     fn deref(&self) -> &Self::Target {
         &self.ro_file
     }
 }
 
-impl<S, C> ops::DerefMut for RWFile<'_, S, C>
+impl<S, C> ops::DerefMut for RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -319,18 +319,18 @@ where
 }
 
 // Constructors
-impl<'a, S, C> RWFile<'a, S, C>
+impl<'a, 's, S, C> RWFile<'a, 's, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
 {
-    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<S, C>) -> Self {
+    pub(crate) fn from_props(props: FileProps, fs: &'a FileSystem<'s, S, C>) -> Self {
         ROFile::from_props(props, fs).into()
     }
 }
 
 // Public functions
-impl<S, C> RWFile<'_, S, C>
+impl<S, C> RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -433,7 +433,7 @@ where
 }
 
 // Private functions
-impl<S, C> RWFile<'_, S, C>
+impl<S, C> RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -537,7 +537,7 @@ where
     }
 }
 
-impl<S, C> ErrorType for RWFile<'_, S, C>
+impl<S, C> ErrorType for RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -545,7 +545,7 @@ where
     type Error = RWFileError<S::Error>;
 }
 
-impl<S, C> Read for RWFile<'_, S, C>
+impl<S, C> Read for RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -576,7 +576,7 @@ where
     }
 }
 
-impl<S, C> Write for RWFile<'_, S, C>
+impl<S, C> Write for RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -660,7 +660,7 @@ where
     }
 }
 
-impl<S, C> Seek for RWFile<'_, S, C>
+impl<S, C> Seek for RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,
@@ -716,7 +716,7 @@ where
     }
 }
 
-impl<S, C> Drop for RWFile<'_, S, C>
+impl<S, C> Drop for RWFile<'_, '_, S, C>
 where
     S: Read + Write + Seek,
     C: Clock,

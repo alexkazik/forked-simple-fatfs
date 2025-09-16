@@ -158,7 +158,7 @@ impl Iterator for SfnGenerator {
 
 pub(crate) fn gen_sfn<S, C, P>(
     string: &str,
-    fs: &FileSystem<S, C>,
+    fs: &FileSystem<'_, S, C>,
     target_dir: P,
 ) -> FSResult<Sfn, S::Error>
 where
