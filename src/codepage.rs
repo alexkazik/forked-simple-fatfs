@@ -1,5 +1,5 @@
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String};
+use alloc::string::String;
 
 #[derive(Debug, Default, Clone, Copy)]
 /// Windows codepage to use for encoding/decoding short filenames
@@ -113,33 +113,32 @@ impl Codepage {
     }
 
     // this might come in handy in the future
-    #[allow(unused)]
-    pub(crate) fn encode(&self, s: &str) -> Box<[u8]> {
-        use oem_cp::encode_string_lossy;
+    pub(crate) fn encode_char_checked(&self, c: char) -> Option<u8> {
+        use oem_cp::encode_char_checked;
 
         match self {
-            Codepage::CP437 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP437),
-            Codepage::CP720 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP720),
-            Codepage::CP737 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP737),
-            Codepage::CP775 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP775),
-            Codepage::CP850 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP850),
-            Codepage::CP852 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP852),
-            Codepage::CP855 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP855),
-            Codepage::CP857 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP857),
-            Codepage::CP858 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP858),
-            Codepage::CP860 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP860),
-            Codepage::CP861 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP861),
-            Codepage::CP862 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP862),
-            Codepage::CP863 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP863),
-            Codepage::CP864 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP864),
-            Codepage::CP865 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP865),
-            Codepage::CP866 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP866),
-            Codepage::CP869 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP869),
-            Codepage::CP874 => encode_string_lossy(s, &oem_cp::code_table::ENCODING_TABLE_CP874),
+            Codepage::CP437 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP437),
+            Codepage::CP720 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP720),
+            Codepage::CP737 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP737),
+            Codepage::CP775 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP775),
+            Codepage::CP850 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP850),
+            Codepage::CP852 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP852),
+            Codepage::CP855 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP855),
+            Codepage::CP857 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP857),
+            Codepage::CP858 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP858),
+            Codepage::CP860 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP860),
+            Codepage::CP861 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP861),
+            Codepage::CP862 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP862),
+            Codepage::CP863 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP863),
+            Codepage::CP864 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP864),
+            Codepage::CP865 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP865),
+            Codepage::CP866 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP866),
+            Codepage::CP869 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP869),
+            Codepage::CP874 => encode_char_checked(c, &oem_cp::code_table::ENCODING_TABLE_CP874),
         }
-        .into_boxed_slice()
     }
 
+    #[allow(unused)]
     pub(crate) fn contains(&self, c: char) -> bool {
         if c.is_ascii() {
             return true;
