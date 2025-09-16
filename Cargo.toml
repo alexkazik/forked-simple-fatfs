@@ -19,8 +19,9 @@ time = { version = "0.3.36", default-features = false, features = [ "parsing", "
 typed-path = { version = "0.10.0", default-features = false }
 
 [features]
-default = ["std", "codepage"]
+default = ["std", "codepage", "alloc_buffer"]
 std = ["time/std", "time/local-offset"]
+alloc_buffer = []
 codepage = ["dep:oem_cp"]
 cp437 = ["dep:oem_cp"]
 cp720 = ["dep:oem_cp"]

@@ -463,6 +463,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc_buffer")]
 /// Constructors for a [`FileSystem`]
 impl<S, C> FileSystem<'static, S, C>
 where
@@ -473,15 +474,46 @@ where
     ///
     /// Fails if the storage is way too small to support a FAT filesystem.
     /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
-    pub fn new(mut storage: S, options: FSOptions<C>) -> FSResult<Self, S::Error> {
+    pub fn new(storage: S, options: FSOptions<C>) -> FSResult<Self, S::Error> {
+        Self::new_inner(storage, options, SectorBuffer::new())
+    }
+}
+
+#[cfg(not(feature = "alloc_buffer"))]
+/// Constructors for a  [`FileSystem`]
+impl<'s, S, C> FileSystem<'s, S, C>
+where
+    S: Read + Seek,
+    C: Clock,
+{
+    /// Create a [`FileSystem`] from a storage object
+    ///
+    /// Fails if the storage is way too small to support a FAT filesystem.
+    /// For most use cases, that shouldn't be an issue, you can just call [`.unwrap()`](Result::unwrap)
+    pub fn new(
+        storage: S,
+        options: FSOptions<C>,
+        buffer: &'s mut [u8; 4096],
+    ) -> FSResult<Self, S::Error> {
+        Self::new_inner(storage, options, SectorBuffer::new(buffer))
+    }
+}
+
+impl<'s, S, C> FileSystem<'s, S, C>
+where
+    S: Read + Seek,
+    C: Clock,
+{
+    fn new_inner(
+        mut storage: S,
+        options: FSOptions<C>,
+        mut buffer: SectorBuffer<'s>,
+    ) -> FSResult<Self, S::Error> {
         use utils::bincode::BINCODE_CONFIG;
 
         // Begin by reading the boot record
         // We don't know the sector size yet, so we just go with the biggest possible one for now
-        let mut buffer = [0u8; MAX_SECTOR_SIZE];
-
         let bytes_read = storage.read(&mut buffer)?;
-        let mut stored_sector = 0;
 
         if bytes_read < MIN_SECTOR_SIZE {
             return Err(FSError::InternalFSError(InternalFSError::StorageTooSmall));
@@ -502,7 +534,7 @@ where
             storage.seek(SeekFrom::Start(
                 u64::from(ebr_fat32.fat_info) * u64::from(bpb.bytes_per_sector),
             ))?;
-            stored_sector = ebr_fat32.fat_info.into();
+            buffer.stored_sector = ebr_fat32.fat_info.into();
             storage.read_exact(&mut buffer[..usize::from(bpb.bytes_per_sector)])?;
             let fsinfo: FSInfoFAT32 = bincode::decode_from_slice(
                 &buffer[..usize::from(bpb.bytes_per_sector)],
@@ -553,13 +585,11 @@ where
 
         let props = FSProperties::from(&boot_record);
 
+        let buffer = buffer.downsize(usize::from(props.sector_size));
+
         let fs = Self {
             storage: storage.into(),
-            sector_buffer: SectorBuffer::new(
-                Box::from(&buffer[..usize::from(props.sector_size)]),
-                stored_sector,
-            )
-            .into(),
+            sector_buffer: buffer.into(),
             fsinfo_modified: false.into(),
             options,
             dir_info: DirInfo::at_root_dir(&boot_record).into(),
