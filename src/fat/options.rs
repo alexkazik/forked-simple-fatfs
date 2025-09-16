@@ -49,6 +49,7 @@ impl Default for FSOptions {
     fn default() -> Self {
         Self {
             clock: Box::new(DefaultClock),
+            #[allow(clippy::default_constructed_unit_structs)] // the allow(clippy) is only used when no codepage feature is used
             codepage: codepage::Codepage::default(),
             update_file_fields: false,
         }

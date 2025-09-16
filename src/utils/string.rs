@@ -258,6 +258,7 @@ fn test_sfn_generator_short() {
     );
 }
 
+#[cfg(feature = "codepage")]
 #[test]
 fn test_sfn_generator_cp_chars_cp437() {
     let mut gen = SfnGenerator::new("tëst.txt", Codepage::CP437);
@@ -266,6 +267,20 @@ fn test_sfn_generator_cp_chars_cp437() {
         gen.next(),
         Some(Sfn {
             name: *b"T\x89ST~1  ",
+            ext: *b"TXT"
+        })
+    );
+}
+
+#[cfg(not(feature = "codepage"))]
+#[test]
+fn test_sfn_generator_cp_chars_ascii() {
+    let mut gen = SfnGenerator::new("tëst.txt", Codepage);
+
+    assert_eq!(
+        gen.next(),
+        Some(Sfn {
+            name: *b"TST~1   ",
             ext: *b"TXT"
         })
     );

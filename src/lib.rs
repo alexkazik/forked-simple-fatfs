@@ -94,6 +94,7 @@
 
 extern crate alloc;
 
+#[cfg_attr(not(feature = "codepage"), path = "codepage_ascii.rs")]
 mod codepage;
 mod error;
 mod fat;
