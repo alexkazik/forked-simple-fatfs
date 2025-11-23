@@ -22,7 +22,7 @@ impl SectorBuffer<false> {
             blocks_per_sector: 1,
         };
 
-        storage.read(0, &mut slf[0..MIN_SECTOR_SIZE.max(S::SIZE)])?;
+        storage.read(BlockIndex(0), &mut slf[0..MIN_SECTOR_SIZE.max(S::SIZE)])?;
 
         Ok(slf)
     }
@@ -42,7 +42,7 @@ impl SectorBuffer<false> {
         };
 
         if usize::from(sector_size) > S::SIZE {
-            storage.read(0, &mut slf)?;
+            storage.read(BlockIndex(0), &mut slf)?;
         }
 
         Ok(slf)
