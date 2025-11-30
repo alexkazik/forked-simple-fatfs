@@ -214,95 +214,111 @@ where
         #[allow(clippy::cast_possible_truncation)]
         let offset = (block_in_vbs % BlockIndex::from(self.vbs_per_hbs)) as usize;
 
-        let buffer = match BUFS {
-            1 => {
-                let buffer = &mut self.buffers[0];
-
-                if buffer.stored_block == real_block
-                    && buffer.status != BlockTranslatorStatus::Unknown
-                {
-                    return Ok((buffer, offset));
-                }
-
-                buffer
-            }
-            2 => {
-                // check newest buffer
-                if self.buffers[self.next].stored_block == real_block
-                    && self.buffers[self.next].status != BlockTranslatorStatus::Unknown
-                {
-                    return Ok((&mut self.buffers[self.next], offset));
-                }
-
-                // switch to older buffer
-                self.next ^= 1;
-
-                let buffer = &mut self.buffers[self.next];
-
-                // check older buffer
-                if buffer.status != BlockTranslatorStatus::Unknown
-                    && buffer.stored_block == real_block
-                {
-                    return Ok((buffer, offset));
-                }
-
-                buffer
-            }
-            _ => {
-                if self.next == usize::MAX {
-                    // reset all ages because an overflow would happen otherwise
-                    let mut ages = [(0, 0); BUFS];
-                    for (num, buf) in self.buffers.iter().enumerate() {
-                        ages[num] = (num, buf.last_used);
-                    }
-                    ages.sort_by_key(|&(_, age)| age);
-                    for (new_age, (num, _last_used)) in ages.into_iter().enumerate() {
-                        self.buffers[num].last_used = new_age;
-                    }
-                    self.next = BUFS;
-                }
-
-                let mut oldest: Option<&'b mut Buffer<'a, BUF_SIZE>> = None;
-
-                // check if the block is already buffered
-                for buffer in self.buffers.iter_mut() {
-                    if buffer.stored_block == real_block
-                        && buffer.status != BlockTranslatorStatus::Unknown
-                    {
-                        // update last_used, unless it already was the last used
-                        if buffer.last_used != self.next - 1 {
-                            buffer.last_used = self.next;
-                            self.next += 1;
-                        }
-
-                        return Ok((buffer, offset));
-                    }
-                    if oldest.is_none() || buffer.last_used < oldest.as_ref().unwrap().last_used {
-                        oldest = Some(buffer);
-                    }
-                }
-
-                // get oldest buffer
-                let buffer = oldest.unwrap();
-
-                buffer.last_used = self.next;
-                self.next += 1;
-
-                buffer
-            }
+        let (buffer, storage) = if BUFS == 1 {
+            self.get_or_go_with_1_buffer(real_block)
+        } else if BUFS == 2 {
+            self.get_or_go_with_2_buffers(real_block)
+        } else {
+            self.get_or_go_with_n_buffers(real_block)
         };
 
-        // store block, if required
-        if buffer.status == BlockTranslatorStatus::Modified {
-            self.storage.write(buffer.stored_block, buffer.buffer)?;
+        if let Some(storage) = storage {
+            // no matching buffer was found, read the block in this buffer
+
+            // store block, if required
+            if buffer.status == BlockTranslatorStatus::Modified {
+                storage.write(buffer.stored_block, buffer.buffer)?;
+            }
+
+            // read block
+            buffer.stored_block = real_block;
+            storage.read(buffer.stored_block, buffer.buffer)?;
+            buffer.status = BlockTranslatorStatus::Read;
         }
 
-        // read block
-        buffer.stored_block = real_block;
-        self.storage.read(buffer.stored_block, buffer.buffer)?;
-        buffer.status = BlockTranslatorStatus::Read;
-
         Ok((buffer, offset))
+    }
+
+    fn get_or_go_with_1_buffer<'b>(
+        &'b mut self,
+        real_block: BlockIndex,
+    ) -> (&'b mut Buffer<'a, BUF_SIZE>, Option<&'b mut S>) {
+        let buffer = &mut self.buffers[0];
+
+        if buffer.stored_block == real_block && buffer.status != BlockTranslatorStatus::Unknown {
+            return (buffer, None);
+        }
+
+        (buffer, Some(&mut self.storage))
+    }
+
+    fn get_or_go_with_2_buffers<'b>(
+        &'b mut self,
+        real_block: BlockIndex,
+    ) -> (&'b mut Buffer<'a, BUF_SIZE>, Option<&'b mut S>) {
+        // check newest buffer
+        if self.buffers[self.next].stored_block == real_block
+            && self.buffers[self.next].status != BlockTranslatorStatus::Unknown
+        {
+            return (&mut self.buffers[self.next], None);
+        }
+
+        // switch to older buffer
+        self.next ^= 1;
+
+        let buffer = &mut self.buffers[self.next];
+
+        // check older buffer
+        if buffer.status != BlockTranslatorStatus::Unknown && buffer.stored_block == real_block {
+            return (buffer, None);
+        }
+
+        (buffer, Some(&mut self.storage))
+    }
+
+    fn get_or_go_with_n_buffers<'b>(
+        &'b mut self,
+        real_block: BlockIndex,
+    ) -> (&'b mut Buffer<'a, BUF_SIZE>, Option<&'b mut S>) {
+        if self.next == usize::MAX {
+            // reset all ages because an overflow would happen otherwise
+            let mut ages = [(0, 0); BUFS];
+            for (num, buf) in self.buffers.iter().enumerate() {
+                ages[num] = (num, buf.last_used);
+            }
+            ages.sort_by_key(|&(_, age)| age);
+            for (new_age, (num, _last_used)) in ages.into_iter().enumerate() {
+                self.buffers[num].last_used = new_age;
+            }
+            self.next = BUFS;
+        }
+
+        let mut oldest: Option<&'b mut Buffer<'a, BUF_SIZE>> = None;
+
+        // check if the block is already buffered
+        for buffer in self.buffers.iter_mut() {
+            if buffer.stored_block == real_block && buffer.status != BlockTranslatorStatus::Unknown
+            {
+                // update last_used, unless it already was the last used
+                if buffer.last_used != self.next - 1 {
+                    buffer.last_used = self.next;
+                    self.next += 1;
+                }
+
+                return (buffer, None);
+            }
+            if oldest.is_none() || buffer.last_used < oldest.as_ref().unwrap().last_used {
+                oldest = Some(buffer);
+            }
+        }
+
+        // get oldest buffer
+        let buffer = oldest.unwrap();
+
+        buffer.last_used = self.next;
+        self.next += 1;
+
+        (buffer, Some(&mut self.storage))
     }
 }
 
