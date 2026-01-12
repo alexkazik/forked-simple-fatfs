@@ -4,7 +4,7 @@
 //! which will hereby after be referred as blocks. This library assumes that
 //! both for read and write operations the block size will be the same.
 
-pub use crate::fat::block_translator::{BlockTranslator, BlockTranslatorError};
+pub use crate::fat::block_translator::{NorFlashError, NorFlashTranslator};
 pub use crate::fat::types::{BlockCount, BlockIndex, BlockSize};
 
 use embedded_io::ErrorType;

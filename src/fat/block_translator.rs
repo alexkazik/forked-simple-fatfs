@@ -7,6 +7,7 @@ use core::fmt::{Debug, Display, Formatter};
 use core::iter;
 use core::ops::{Deref, DerefMut};
 use embedded_io::{ErrorKind, ErrorType};
+use embedded_storage::nor_flash::NorFlash;
 
 /// Translate between different hardware and software "virtual" block sizes.
 ///
@@ -27,60 +28,54 @@ use embedded_io::{ErrorKind, ErrorType};
 /// Example:
 /// ```rust
 /// # use simple_fatfs::block_io::*;
-/// # struct Store();
-/// # impl embedded_io::ErrorType for Store { type Error = BlockTranslatorError; }
-/// impl BlockBase for Store {
-///     fn block_size(&self) -> BlockSize { 65536 }
+/// # use embedded_storage::nor_flash::{ErrorType, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash};
+/// # #[derive(Debug)]
+/// # struct FlashWriteError;
+/// # impl NorFlashError for FlashWriteError {
+/// #     fn kind(&self) -> NorFlashErrorKind { NorFlashErrorKind::Other }
+/// # }
+/// # struct Flash();
+/// # impl ErrorType for Flash {
+/// #     type Error = FlashWriteError;
+/// # }
+/// # impl ReadNorFlash for Flash {
+/// #     const READ_SIZE: usize = 1;
+/// #     fn read(&mut self, _offset: u32, _buf: &mut [u8]) -> Result<(), Self::Error> { Ok(()) }
+/// #     fn capacity(&self) -> usize { 65536 }
+/// # }
+/// impl NorFlash for Flash {
+///     const WRITE_SIZE: usize = 65536;
+///     const ERASE_SIZE: usize = 65536;
 ///     // ...
-///     # fn block_count(&self) -> BlockCount {
-///         # 1
-///     # }
+///  #    fn erase(&mut self, _from: u32, _to: u32) -> Result<(), Self::Error> { Ok(()) }
+///  #    fn write(&mut self, _offset: u32, _buf: &[u8]) -> Result<(), Self::Error> { Ok(()) }
 /// }
-/// # impl BlockRead for Store {
-///     # fn read(&mut self, _: BlockIndex, _: &mut [u8]) -> Result<(), Self::Error> { Ok(()) }
-/// # }
-/// # impl BlockWrite for Store {
-///     # fn write(&mut self, _: BlockIndex, _: &[u8]) -> Result<(), Self::Error> { Ok(()) }
-///     # fn flush(&mut self) -> Result<(), Self::Error> { Ok(()) }
-/// # }
 ///
 /// // create storage
-/// let mut storage = Store(/*...*/);
+/// let mut flash = Flash(/*...*/);
 ///
 /// // create buffer and the translation level
 /// let mut buffer = [0u8; 65536];
-/// let mut translated = BlockTranslator::<512, _, _, _>::new_with_buffer(&mut storage, [&mut buffer])?;
+/// let mut translated = NorFlashTranslator::<512, _, _, _>::new_with_buffer(&mut flash, [&mut buffer]);
 ///
 /// // write one block and flush it
 /// translated.write(0, &[11; 512])?;
 /// translated.flush()?;
 ///
-/// # Ok::<(), BlockTranslatorError>(())
+/// # Ok::<(), simple_fatfs::block_io::NorFlashError<FlashWriteError>>(())
 /// ```
 ///
 /// The following must held true, otherwise an error occurs:
-/// * virtual block size <= hardware block size <= buffer size
-/// * at least one buffer
-/// * virtual and hardware block sizes must be greater than 0 and a power of two
-///
-/// # Errors
-///
-/// The following errors will be reported at compile time (when using `new`):
 /// * number of buffers (BUFS) must be greater than zero
-/// * buffer size must be bigger or equal than virtual block size
-/// * virtual block size must be a power of two
-///
-/// The following errors will be returned by `new`:
-/// * buffer size must be greater or equal than the hardware block size
-/// * hardware block size must be a power of two
-/// * hardware block size must greater or equal than virtual block size
+/// * all block sizes (VBS, READ_SIZE, WRITE_SIZE, ERASE_SIZE) must be a power of two
+/// * 0 < READ_SIZE <= VBS <= ERASE_SIZE <= BUF_SIZE
+/// * READ_SIZE <= WRITE_SIZE <= ERASE_SIZE
 
 #[derive(Debug)]
-pub struct BlockTranslator<'a, const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S>
+pub struct NorFlashTranslator<'a, const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
-    vbs_per_hbs: u32,
     buffers: [Buffer<'a, BUF_SIZE>; BUFS],
     storage: S,
     /// BUFS==1: unused
@@ -98,7 +93,8 @@ enum BufferLocation<'a, const BUF_SIZE: usize> {
 #[derive(Debug)]
 struct Buffer<'a, const BUF_SIZE: usize> {
     buffer: BufferLocation<'a, BUF_SIZE>,
-    stored_block: BlockIndex,
+    // despite the handling in the rest of the library, this is a byte offset to a block, not a block number
+    stored_block: u32,
     status: BlockTranslatorStatus,
     /// BUFS<=2: unused
     /// BUFS>=3: "timestamp" when buffer was used last
@@ -112,54 +108,49 @@ enum BlockTranslatorStatus {
     Modified,
 }
 
-/// This error represents a mismatch between the underlying storage and the supplied block size.
-#[non_exhaustive]
-#[derive(Copy, Clone)]
-pub enum BlockTranslatorError {
-    /// Buffer size must be greater or equal than the hardware block size
-    BufferSizeTooSmall,
-    /// Hardware block size must be a power of two
-    HardwareBlockSizeNotPowerOfTwo,
-    /// Hardware block size must greater or equal than virtual block size
-    HardwareBlockSizeToSmall,
-}
+/// Wrapper to allow [`ErrorType::Error`](embedded_storage::nor_flash::ErrorType::Error) as [`ErrorType::Error`].
+#[derive(Debug)]
+pub struct NorFlashError<E>(pub E);
 
-impl Display for BlockTranslatorError {
+impl<E: Display> Display for NorFlashError<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            BlockTranslatorError::BufferSizeTooSmall => {
-                "buffer size must be greater or equal than the hardware block size"
-            }
-            BlockTranslatorError::HardwareBlockSizeNotPowerOfTwo => {
-                "hardware block size must be a power of two"
-            }
-            BlockTranslatorError::HardwareBlockSizeToSmall => {
-                "hardware block size must greater or equal than virtual block size"
-            }
-        })
+        f.write_str("NorFlashError:")?;
+        self.0.fmt(f)
     }
 }
 
-impl Debug for BlockTranslatorError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        use core::fmt::Display;
+impl<E: Debug + Display> core::error::Error for NorFlashError<E> {}
 
-        Display::fmt(self, f)
-    }
-}
-
-impl core::error::Error for BlockTranslatorError {}
-
-impl embedded_io::Error for BlockTranslatorError {
+impl<E: Debug> embedded_io::Error for NorFlashError<E> {
     fn kind(&self) -> ErrorKind {
-        ErrorKind::InvalidData
+        ErrorKind::Other
+    }
+}
+
+impl<E> Deref for NorFlashError<E> {
+    type Target = E;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<E> DerefMut for NorFlashError<E> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<E> From<E> for NorFlashError<E> {
+    fn from(value: E) -> Self {
+        Self(value)
     }
 }
 
 impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S>
-    BlockTranslator<'static, VBS, BUF_SIZE, BUFS, S>
+    NorFlashTranslator<'static, VBS, BUF_SIZE, BUFS, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
     /// Create a new BlockTranslator.
     ///
@@ -168,7 +159,7 @@ where
     /// ```no_compile
     /// let mut translated = BlockTranslator::<512, 65536, 1, _>::new(&mut storage)?;
     /// ```
-    pub fn new(storage: S) -> Result<Self, BlockTranslatorError> {
+    pub fn new(storage: S) -> Self {
         Self::new_internal(
             storage,
             iter::from_fn(|| Some(BufferLocation::Owned(Box::new([0; BUF_SIZE])))),
@@ -177,10 +168,17 @@ where
 }
 
 impl<'a, const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S>
-    BlockTranslator<'a, VBS, BUF_SIZE, BUFS, S>
+    NorFlashTranslator<'a, VBS, BUF_SIZE, BUFS, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
+    #[expect(clippy::cast_possible_truncation)]
+    // since usize is at least 32-bits long, this is ok
+    const HW_BLOCK_SIZE: u32 = S::ERASE_SIZE as u32;
+
+    // since usize is at least 32-bits long, this is ok
+    const VBS_USIZE: usize = VBS as usize;
+
     /// Create a new BlockTranslator.
     ///
     /// Example:
@@ -189,15 +187,12 @@ where
     /// let mut buffer = [0u8; 65536];
     /// let mut translated = BlockTranslator::<512, _, _, _>::new_with_buffer(&mut storage, [&mut buffer])?;
     /// ```
-    pub fn new_with_buffer(
-        storage: S,
-        buffer: [&'a mut [u8; BUF_SIZE]; BUFS],
-    ) -> Result<Self, BlockTranslatorError> {
+    pub fn new_with_buffer(storage: S, buffer: [&'a mut [u8; BUF_SIZE]; BUFS]) -> Self {
         Self::new_internal(storage, buffer.into_iter().map(BufferLocation::Borrowed))
     }
 
     /// Create a new BlockTranslator.
-    fn new_internal<I>(storage: S, mut buffers: I) -> Result<Self, BlockTranslatorError>
+    fn new_internal<I>(storage: S, mut buffers: I) -> Self
     where
         I: Iterator<Item = BufferLocation<'a, BUF_SIZE>>,
     {
@@ -206,30 +201,25 @@ where
             if BUFS == 0 {
                 panic!("number of buffers (BUFS) must be greater than zero");
             }
-            // since usize is at least 32-bits long, this is ok
-            if BUF_SIZE < VBS as usize {
-                panic!("buffer size must be bigger or equal than virtual block size");
+            if !VBS.is_power_of_two()
+                || !S::READ_SIZE.is_power_of_two()
+                || !S::WRITE_SIZE.is_power_of_two()
+                || !S::ERASE_SIZE.is_power_of_two()
+            {
+                panic!("all block sizes (VBS, READ_SIZE, WRITE_SIZE, ERASE_SIZE) must be a power of two");
             }
-            if !VBS.is_power_of_two() {
-                panic!("virtual block size must be a power of two");
+            if S::READ_SIZE == 0
+                || S::READ_SIZE > Self::VBS_USIZE
+                || Self::VBS_USIZE > S::ERASE_SIZE
+                || S::ERASE_SIZE > BUF_SIZE
+                || S::READ_SIZE > S::WRITE_SIZE
+                || S::WRITE_SIZE > S::ERASE_SIZE
+            {
+                panic!("the following must be satisfied: 0 < READ_SIZE <= VBS <= ERASE_SIZE <= BUF_SIZE and READ_SIZE <= WRITE_SIZE <= ERASE_SIZE")
             }
         }
 
-        let hardware_block_size = storage.block_size();
-
-        if !hardware_block_size.is_power_of_two() {
-            return Err(BlockTranslatorError::HardwareBlockSizeNotPowerOfTwo);
-        }
-
-        if usize::try_from(hardware_block_size).unwrap() > BUF_SIZE {
-            return Err(BlockTranslatorError::BufferSizeTooSmall);
-        }
-
-        if hardware_block_size < VBS {
-            return Err(BlockTranslatorError::HardwareBlockSizeToSmall);
-        }
-
-        Ok(Self {
+        Self {
             storage,
             buffers: array::from_fn::<_, BUFS, _>(|i| Buffer {
                 buffer: buffers.next().unwrap(),
@@ -238,14 +228,13 @@ where
                 last_used: i,
             }),
             next: if BUFS >= 3 { BUFS } else { 0 },
-            vbs_per_hbs: hardware_block_size / VBS,
-        })
+        }
     }
 
     fn go_to_block<'b>(
         &'b mut self,
         block_in_vbs: BlockIndex,
-    ) -> Result<(&'b mut Buffer<'a, BUF_SIZE>, usize), S::Error> {
+    ) -> Result<(&'b mut Buffer<'a, BUF_SIZE>, usize), NorFlashError<S::Error>> {
         // assert that all known blocks are distinct
         debug_assert!(!self.buffers.iter().enumerate().any(|(p1, b1)| b1.status
             != BlockTranslatorStatus::Unknown
@@ -253,9 +242,12 @@ where
                 && b2.status != BlockTranslatorStatus::Unknown
                 && b1.stored_block == b2.stored_block)));
 
-        let real_block = block_in_vbs / BlockIndex::from(self.vbs_per_hbs);
-        #[cfg_attr(feature = "lba64", expect(clippy::cast_possible_truncation))]
-        let offset = (block_in_vbs % BlockIndex::from(self.vbs_per_hbs)) as usize;
+        #[cfg_attr(not(feature = "lba64"), expect(clippy::useless_conversion))]
+        let byte_offset = u32::try_from(block_in_vbs).unwrap() * VBS;
+        // despite the handling in the rest of the library, this is a byte offset to a block, not a block number
+        let real_block = (byte_offset / Self::HW_BLOCK_SIZE) * Self::HW_BLOCK_SIZE;
+        // since usize is at least 32-bits long, this is ok
+        let offset = (byte_offset % Self::HW_BLOCK_SIZE) as usize;
 
         let buffer = match BUFS {
             1 => {
@@ -337,6 +329,10 @@ where
 
         // store block, if required
         if buffer.status == BlockTranslatorStatus::Modified {
+            self.storage.erase(
+                buffer.stored_block,
+                buffer.stored_block + Self::HW_BLOCK_SIZE,
+            )?;
             self.storage.write(buffer.stored_block, &*buffer.buffer)?;
         }
 
@@ -351,17 +347,17 @@ where
 }
 
 impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> ErrorType
-    for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
+    for NorFlashTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
-    type Error = S::Error;
+    type Error = NorFlashError<S::Error>;
 }
 
 impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> BlockBase
-    for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
+    for NorFlashTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
     #[inline]
     fn block_size(&self) -> BlockSize {
@@ -370,14 +366,14 @@ where
 
     #[inline]
     fn block_count(&self) -> BlockCount {
-        self.storage.block_count() * BlockCount::from(self.vbs_per_hbs)
+        BlockCount::try_from(self.storage.capacity() / Self::VBS_USIZE).unwrap()
     }
 }
 
 impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> BlockRead
-    for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
+    for NorFlashTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
     fn read(
         &mut self,
@@ -399,9 +395,9 @@ where
 }
 
 impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> BlockWrite
-    for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
+    for NorFlashTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
     fn write(&mut self, mut block_in_vbs: BlockIndex, mut buf: &[u8]) -> Result<(), Self::Error> {
         while !buf.is_empty() {
@@ -421,19 +417,23 @@ where
     fn flush(&mut self) -> Result<(), Self::Error> {
         for buffer in self.buffers.iter_mut() {
             if buffer.status == BlockTranslatorStatus::Modified {
+                self.storage.erase(
+                    buffer.stored_block,
+                    buffer.stored_block + Self::HW_BLOCK_SIZE,
+                )?;
                 self.storage.write(buffer.stored_block, &*buffer.buffer)?;
                 buffer.status = BlockTranslatorStatus::Read;
             }
         }
 
-        self.storage.flush()
+        Ok(())
     }
 }
 
 impl<const VBS: BlockSize, const BUF_SIZE: usize, const BUFS: usize, S> Drop
-    for BlockTranslator<'_, VBS, BUF_SIZE, BUFS, S>
+    for NorFlashTranslator<'_, VBS, BUF_SIZE, BUFS, S>
 where
-    S: BlockWrite,
+    S: NorFlash,
 {
     fn drop(&mut self) {
         let _ = self.flush();

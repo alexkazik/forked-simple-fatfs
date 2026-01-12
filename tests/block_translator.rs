@@ -1,39 +1,83 @@
-use embedded_io::ErrorType;
+use embedded_storage::nor_flash::{
+    ErrorType, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
+};
 use simple_fatfs::block_io::*;
 
 #[derive(Debug)]
-struct Storage<'a, const BS: BlockSize>(&'a mut [u8; 64]);
+struct Storage<'a, const BS: usize>(&'a mut [u8; 64]);
 
-impl<const BS: BlockSize> BlockBase for Storage<'_, BS> {
-    fn block_size(&self) -> BlockSize {
-        BS
-    }
+impl<const BS: usize> ReadNorFlash for Storage<'_, BS> {
+    const READ_SIZE: usize = 1;
 
-    fn block_count(&self) -> BlockCount {
-        (64 / BS).into()
-    }
-}
-
-impl<const BS: BlockSize> BlockRead for Storage<'_, BS> {
-    fn read(&mut self, block: BlockIndex, buf: &mut [u8]) -> Result<(), Self::Error> {
-        let offset: usize = (block * BlockIndex::from(BS)).try_into().unwrap();
+    fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
+        let offset: usize = offset as usize;
         buf.copy_from_slice(&self.0[offset..offset + buf.len()]);
         Ok(())
     }
+
+    fn capacity(&self) -> usize {
+        64
+    }
 }
 
-impl<const BS: BlockSize> ErrorType for Storage<'_, BS> {
-    type Error = embedded_io::SliceWriteError;
+#[derive(Debug)]
+struct FlashWriteError;
+
+impl NorFlashError for FlashWriteError {
+    fn kind(&self) -> NorFlashErrorKind {
+        NorFlashErrorKind::Other
+    }
 }
 
-impl<const BS: BlockSize> BlockWrite for Storage<'_, BS> {
-    fn write(&mut self, block: BlockIndex, buf: &[u8]) -> Result<(), Self::Error> {
-        let offset: usize = (block * BlockIndex::from(BS)).try_into().unwrap();
-        self.0[offset..offset + buf.len()].clone_from_slice(buf);
+impl<const BS: usize> ErrorType for Storage<'_, BS> {
+    type Error = FlashWriteError;
+}
+
+impl<const BS: usize> NorFlash for Storage<'_, BS> {
+    const WRITE_SIZE: usize = BS;
+    const ERASE_SIZE: usize = BS;
+
+    fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+        if !from.is_multiple_of(BS as u32) {
+            panic!("write error, from is not a multiple of BS");
+        }
+        if !to.is_multiple_of(BS as u32) {
+            panic!("write error, to is not a multiple of BS");
+        }
+
+        for i in from..to {
+            self.0[i as usize] = 0xff;
+        }
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), Self::Error> {
+    fn write(&mut self, offset: u32, buf: &[u8]) -> Result<(), Self::Error> {
+        let offset: usize = offset as usize;
+
+        if !offset.is_multiple_of(BS) {
+            panic!("write error, offset is not a multiple of BS");
+        }
+        if !buf.len().is_multiple_of(BS) {
+            panic!("write error, buf.len() is not a multiple of BS");
+        }
+
+        // check if the bits can be programmed
+        for (o, (f, b)) in self.0[offset..offset + buf.len()]
+            .iter()
+            .zip(buf)
+            .enumerate()
+        {
+            if *f & *b != *b {
+                panic!(
+                    "write error, tried to write a 1 into a 0 at offset {}, byte in flash {f:#02x}, byte in buffer {b:#02x}",
+                    offset + o
+                );
+            }
+        }
+
+        // write
+        self.0[offset..offset + buf.len()].clone_from_slice(buf);
+
         Ok(())
     }
 }
@@ -120,23 +164,19 @@ fn run_block_translator<const BUFS: usize>(buffer: Option<[&mut [u8; 4]; BUFS]>)
     let mut storage_b = Storage::<4>(&mut array_b);
 
     // ensure that total number of bytes are equal
-    assert_eq!(
-        BlockCount::from(storage_a.block_size()) * storage_a.block_count(),
-        BlockCount::from(storage_b.block_size()) * storage_b.block_count()
-    );
+    assert_eq!(storage_a.capacity(), storage_b.capacity());
 
     // C = translated B into 64 * 1
     let mut translated_c = match buffer {
-        None => BlockTranslator::<1, _, _, _>::new(&mut storage_b),
-        Some(buffer) => BlockTranslator::<1, _, _, _>::new_with_buffer(&mut storage_b, buffer),
-    }
-    .unwrap();
+        None => NorFlashTranslator::<1, _, _, _>::new(&mut storage_b),
+        Some(buffer) => NorFlashTranslator::<1, _, _, _>::new_with_buffer(&mut storage_b, buffer),
+    };
 
-    // ensure that block size and count are equal
-    assert_eq!(
-        (storage_a.block_size(), storage_a.block_count()),
-        (translated_c.block_size(), translated_c.block_count())
-    );
+    // ensure that total number of bytes are equal
+    #[cfg_attr(feature = "lba64", expect(clippy::useless_conversion))]
+    let translated_capacity =
+        u64::from(translated_c.block_size()) * u64::from(translated_c.block_count());
+    assert_eq!(storage_a.capacity() as u64, translated_capacity);
 
     // randomly read/write a byte from/into both storages and expect them to be identical
     for _ in 0..100_000 {
@@ -145,20 +185,20 @@ fn run_block_translator<const BUFS: usize>(buffer: Option<[&mut [u8; 4]; BUFS]>)
             let mut buf_a = [0u8; 1];
             let mut buf_b = [0u8; 1];
             storage_a.read(offset, &mut buf_a).unwrap();
-            translated_c.read(offset, &mut buf_b).unwrap();
+            #[cfg_attr(not(feature = "lba64"), expect(clippy::useless_conversion))]
+            translated_c.read(offset.into(), &mut buf_b).unwrap();
             assert_eq!(buf_a, buf_b, "random read with {BUFS} buffers");
         } else {
             let value = [rand::random()];
+            storage_a.erase(offset, offset + 1).unwrap();
             storage_a.write(offset, &value).unwrap();
-            translated_c.write(offset, &value).unwrap();
+            #[cfg_attr(not(feature = "lba64"), expect(clippy::useless_conversion))]
+            translated_c.write(offset.into(), &value).unwrap();
         }
     }
 
-    // flush both storages
-    storage_a.flush().unwrap();
+    // flush and drop the translation level
     translated_c.flush().unwrap();
-
-    // drop the translation level
     drop(translated_c);
 
     // assure that the underlying storage of both is identical
